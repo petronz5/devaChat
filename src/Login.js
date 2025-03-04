@@ -8,14 +8,34 @@ function Login() {
 
   const handleLogin = async (type) => {
     if (type === 'login') {
-      const { error } = await supabase.auth.signIn({ email, password });
+      // Usa signInWithPassword per il login
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) alert(error.message);
     } else if (type === 'signup') {
-      const { error } = await supabase.auth.signUp({ email, password });
-      if (error) alert(error.message);
-      else alert('Controlla la tua email per confermare la registrazione!');
+      // Per la registrazione, il metodo rimane signUp
+      const { data, error } = await supabase.auth.signUp({ email, password });
+  
+      if (error) {
+        alert(error.message);
+      } else {
+        alert('Controlla la tua email per confermare la registrazione!');
+  
+        // Se il trigger non ha funzionato, creiamo manualmente il profilo
+        if (data.user) {
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .insert([{ id: data.user.id, email: email }]);
+  
+          if (profileError) {
+            console.error("Errore nella creazione del profilo:", profileError.message);
+          } else {
+            console.log("Profilo creato con successo!");
+          }
+        }
+      }
     }
   };
+  
 
   return (
     <div className="login-container">

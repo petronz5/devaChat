@@ -9,17 +9,21 @@ function App() {
   const [session, setSession] = useState(null);
 
   useEffect(() => {
-    // Controlla se esiste già una sessione
-    const currentSession = supabase.auth.session();
-    setSession(currentSession);
+    // Recupera la sessione in modo asincrono
+    async function loadSession() {
+      const { data: { session } } = await supabase.auth.getSession();
+      setSession(session);
+    }
+    loadSession();
 
     // Ascolta i cambiamenti di autenticazione
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
     });
 
+    // Pulisce il listener quando il componente viene smontato
     return () => {
-      authListener.unsubscribe();
+      authListener.subscription.unsubscribe();
     };
   }, []);
 
