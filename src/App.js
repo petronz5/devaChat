@@ -1,40 +1,53 @@
 // src/App.js
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { supabase } from './supabaseClient';
 import ChatRoom from './ChatRoom';
 import FriendsPage from './FriendsPage';
+import Profile from './Profile';
 import Login from './Login';
+
+function AppRoutes({ session }) {
+  // useNavigate viene usato qui, che è un discendente di BrowserRouter
+  const navigate = useNavigate();
+
+  const handleShowProfile = () => {
+    navigate('/profile');
+  };
+
+  return (
+    <Routes>
+      <Route path="/" element={<ChatRoom session={session} onShowProfile={handleShowProfile} />} />
+      <Route path="/friends" element={<FriendsPage session={session} />} />
+      <Route path="/profile" element={<Profile session={session} onClose={() => navigate('/')} />} />
+    </Routes>
+  );
+}
 
 function App() {
   const [session, setSession] = useState(null);
 
   useEffect(() => {
-    // Carico la session da Supabase
+    // Carico la sessione da Supabase
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
     });
-    // Ascolta i cambiamenti di auth
+    // Ascolto i cambiamenti di autenticazione
     const { data: authListener } = supabase.auth.onAuthStateChange(
       (event, session) => {
         setSession(session);
       }
     );
-    // Ritorno cleanup
     return () => {
       authListener.subscription.unsubscribe();
     };
   }, []);
 
-  // Richiesta permesso Notifiche + registra service worker
+  // Richiesta permesso notifiche + registrazione service worker
   useEffect(() => {
     if ('Notification' in window) {
       Notification.requestPermission().then((permission) => {
-        if (permission === 'granted') {
-          console.log('Notifiche consentite dal browser.');
-        } else {
-          console.log('Notifiche negate/ignorate.');
-        }
+        console.log(permission === 'granted' ? 'Notifiche consentite.' : 'Notifiche negate.');
       });
     }
     if ('serviceWorker' in navigator) {
@@ -50,10 +63,7 @@ function App() {
 
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<ChatRoom session={session} />} />
-        <Route path="/friends" element={<FriendsPage session={session} />} />
-      </Routes>
+      <AppRoutes session={session} />
     </BrowserRouter>
   );
 }

@@ -1,10 +1,11 @@
 // src/ChatRoom.js
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
+import { Link } from 'react-router-dom';  // Per il pulsante Amici
 import './ChatRoom.css';
 
 function ChatRoom({ session, onShowProfile }) {
-  // ---------- 1) STATE per STANZE, MESSAGGI, FILE -----------
+  // ---------- STATO PRINCIPALE -----------
   const [rooms, setRooms] = useState([]);
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [newRoomName, setNewRoomName] = useState('');
@@ -13,43 +14,51 @@ function ChatRoom({ session, onShowProfile }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
 
-  // ---------- 2) PRESENCE & TYPING -----------
   const [typingUsers, setTypingUsers] = useState([]);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const presenceChannelRef = useRef(null);
 
-  // ---------- 3) REAZIONI e MENU -----------
+  // Menu Reazioni
   const [reactionMenu, setReactionMenu] = useState(null);
 
-  // ---------- 4) INVITO UTENTE -----------
+  // Invito utente
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [pendingInvites, setPendingInvites] = useState([]);
 
-  // ---------- 5) INVIO MESSAGGIO -----------
+  // Invio messaggio
   const [newMessage, setNewMessage] = useState('');
 
-  // ---------- 6) CONTEXT MENU STANZA -----------
+  // Context menu stanza
   const [contextMenu, setContextMenu] = useState(null);
   const [editRoomName, setEditRoomName] = useState('');
 
-  // ---------- 7) DETTAGLIO CANALE (MODALE) -----------
+  // Dettaglio canale
   const [showChannelDetail, setShowChannelDetail] = useState(false);
   const [channelMembers, setChannelMembers] = useState([]);
 
-  // ---------- 8) REGISTRAZIONE VOCALE -----------
+  // Registrazione vocale
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const [audioChunks, setAudioChunks] = useState([]);
 
-  // ---------- 9) SETTINGS: MULTI-TEMA -----------
+  // Settings (multi-tema)
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [theme, setTheme] = useState('light'); // "light" | "dark" | "blue" | "pink" ...
 
-  // ---------- 10) RIFERIMENTI MENU -----------
+  // Riferimenti per menu
   const menuRef = useRef();
   const reactionRef = useRef();
 
-  // ---------- 11) EFFETTI INIZIALI -----------
+  // ---------- CHIAMATA DI GRUPPO -----------
+  const [callActive, setCallActive] = useState(false); // se è in corso una chiamata
+  const [callHostId, setCallHostId] = useState(null); // chi ha avviato la chiamata
+  const [localStream, setLocalStream] = useState(null);
+  const pcMapRef = useRef({}); // Mappa peerID -> RTCPeerConnection (grezzo per demoy)
+
+  // Lista ID dei partecipanti nella call
+  const [callParticipants, setCallParticipants] = useState([]);
+
+  // Al mount, carica stanze, inviti, presence
   useEffect(() => {
     if (session) {
       fetchRooms();
@@ -62,7 +71,7 @@ function ChatRoom({ session, onShowProfile }) {
     // eslint-disable-next-line
   }, [session]);
 
-  // Chiusura menu cliccando fuori
+  // Chiude menu su click esterno
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
@@ -78,23 +87,21 @@ function ChatRoom({ session, onShowProfile }) {
     };
   }, []);
 
-  // ---------- 12) FUNZIONI: STANZE -----------
+  // 1) STANZE
   const fetchRooms = async () => {
     const { data, error } = await supabase
       .from('room_members')
       .select('room_id, rooms!inner(id, name, created_by)')
       .eq('user_id', session.user.id)
       .eq('status', 'accepted');
-
     if (!error && data) {
-      const r = data.map((item) => item.rooms);
+      const r = data.map(item => item.rooms);
       setRooms(r);
     }
   };
-
   const handleCreateRoom = async () => {
     if (!newRoomName) return;
-    let { data, error } = await supabase
+    const { data, error } = await supabase
       .from('rooms')
       .insert([{ name: newRoomName, created_by: session.user.id }])
       .select();
@@ -110,7 +117,7 @@ function ChatRoom({ session, onShowProfile }) {
     }
   };
 
-  // ---------- 13) FUNZIONI: INVITI -----------
+  // 2) INVITI
   const fetchInvitations = async () => {
     const { data, error } = await supabase
       .from('room_members')
@@ -121,7 +128,6 @@ function ChatRoom({ session, onShowProfile }) {
       setPendingInvites(data);
     }
   };
-
   const handleAcceptInvite = async (invite) => {
     const { data, error } = await supabase
       .from('room_members')
@@ -130,33 +136,29 @@ function ChatRoom({ session, onShowProfile }) {
       .eq('user_id', session.user.id)
       .select();
     if (!error && data && data.length > 0) {
-      alert(`Hai accettato l'invito per la stanza ${invite.rooms.name}`);
+      alert(`Accettato invito per ${invite.rooms.name}`);
       fetchInvitations();
       fetchRooms();
     }
   };
-
   const handleDeclineInvite = async (invite) => {
-    const { error } = await supabase
+    await supabase
       .from('room_members')
       .delete()
       .eq('room_id', invite.room_id)
       .eq('user_id', session.user.id);
-    if (!error) {
-      alert(`Hai rifiutato l'invito per la stanza ${invite.rooms.name}`);
-      fetchInvitations();
-    }
+    alert(`Rifiutato invito per ${invite.rooms.name}`);
+    fetchInvitations();
   };
 
-  // ---------- 14) FUNZIONI: SELEZIONE STANZA + MESSAGGI -----------
+  // 3) SELECT ROOM + load messages + webrtc events
   const handleSelectRoom = async (room) => {
     setSelectedRoom(room);
     await loadMessages(room.id);
 
-    // Rimuovo canali precedenti
     supabase.removeAllChannels();
 
-    // Sottoscrizione realtime su messages
+    // Sottoscrizione messaggi
     const channel = supabase.channel(`room-${room.id}`, {
       config: { broadcast: { ack: true } },
     });
@@ -165,16 +167,12 @@ function ChatRoom({ session, onShowProfile }) {
       event: 'INSERT',
       schema: 'public',
       table: 'messages',
-      filter: `room_id=eq.${room.id}`,
+      filter: `room_id=eq.${room.id}`
     }, (payload) => {
       const newMsg = payload.new;
-      setMessages((prev) => [...prev, newMsg]);
-
-      // ESEMPIO: NOTIFICA LOCALE
-      if (document.hidden) { // se la pagina non è in focus
-        new Notification('Nuovo messaggio', {
-          body: newMsg.content.slice(0, 40)
-        });
+      setMessages(prev => [...prev, newMsg]);
+      if (document.hidden) {
+        new Notification('Nuovo messaggio', { body: newMsg.content.slice(0, 40) });
       }
     });
 
@@ -186,11 +184,54 @@ function ChatRoom({ session, onShowProfile }) {
       loadMessages(room.id);
     });
 
+    // *** CHIAMATE: call-started, call-join, webrtc-offer, webrtc-answer, webrtc-ice
+    channel.on('broadcast', { event: 'call-started' }, ({ payload }) => {
+      if (!callActive) {
+        setCallActive(true);
+        setCallHostId(payload.hostId);
+        setCallParticipants([payload.hostId]);
+        alert(`Chiamata avviata da ${payload.hostId}. Puoi "Unirti".`);
+      }
+    });
+
+    channel.on('broadcast', { event: 'call-join' }, ({ payload }) => {
+      console.log('Utente si unisce alla call:', payload.userId);
+      // Aggiungiamo a callParticipants
+      setCallParticipants(prev => {
+        const setNew = new Set(prev);
+        setNew.add(payload.userId);
+        return [...setNew];
+      });
+      // Creiamo una connessione con quell'utente (host o peer)
+      createPeerConnection(payload.userId, channel);
+      if (localStream) {
+        // Aggiungiamo tracce
+        localStream.getTracks().forEach(track => {
+          pcMapRef.current[payload.userId].addTrack(track, localStream);
+        });
+      }
+
+      // Se noi siamo "host" o comunque già nella call, generiamo un Offer
+      if (callHostId === session.user.id || callParticipants.length > 0) {
+        makeOffer(payload.userId, channel);
+      }
+    });
+
+    channel.on('broadcast', { event: 'webrtc-offer' }, ({ payload }) => {
+      handleOffer(payload, channel);
+    });
+    channel.on('broadcast', { event: 'webrtc-answer' }, ({ payload }) => {
+      handleAnswer(payload);
+    });
+    channel.on('broadcast', { event: 'webrtc-ice' }, ({ payload }) => {
+      handleIceCandidate(payload);
+    });
+
     channel.subscribe();
   };
 
   const loadMessages = async (roomId) => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('messages')
       .select(`
         id, room_id, user_id, content, attachment_url,
@@ -199,30 +240,24 @@ function ChatRoom({ session, onShowProfile }) {
       `)
       .eq('room_id', roomId)
       .order('created_at', { ascending: true });
-    if (!error && data) {
-      setMessages(data);
-    }
+    if (data) setMessages(data);
   };
 
-  // ---------- 15) RICERCA + EVIDENZIAZIONE -----------
+  // ========== 4) RICERCA e Menzioni ===============
   const highlightText = (text, term) => {
-    if (!term) term = ''; 
     // Menzioni
     text = text.replace(/@(\w+)/g, '<span class="mention">@$1</span>');
-
     if (!term) return text;
     const regex = new RegExp(`(${term})`, 'gi');
     return text.replace(regex, `<mark>$1</mark>`);
   };
 
-  // ---------- 16) INVIA MESSAGGIO (con menzioni & bot) -----------
+  // ========== 5) INVIA MESSAGGIO ===============
   const handleSendMessage = async () => {
-    if (!selectedRoom) return;
-    if (!newMessage && !selectedFile) return;
+    if (!selectedRoom || (!newMessage && !selectedFile)) return;
 
     // Se /bot ...
     if (newMessage.startsWith('/bot ')) {
-      // Esempio: Chiama un endpoint esterno e lascia che il "bot" re-inserisca il messaggio
       const botText = newMessage.slice(5);
       await fetch('https://mio-endpoint-bot.com/botMessage', {
         method: 'POST',
@@ -233,17 +268,16 @@ function ChatRoom({ session, onShowProfile }) {
         })
       });
       setNewMessage('');
-      return; // non inserisco localmente
+      return;
     }
 
-    // Se ci sono menzioni: @pippo
+    // Menzioni
     const mentionRegex = /@(\w+)/g;
     const matches = newMessage.match(mentionRegex);
     if (matches) {
       for (const m of matches) {
-        const username = m.slice(1); 
-        // Potresti cercare user in 'profiles' e inviare notifica
-        // ...
+        const username = m.slice(1);
+        // Esempio: potresti cercare in 'profiles' e avvisare quell'utente
       }
     }
 
@@ -251,11 +285,10 @@ function ChatRoom({ session, onShowProfile }) {
     let file_name = null;
     let file_type = null;
 
-    // Carico file se presente
+    // Upload file
     if (selectedFile) {
       const ext = selectedFile.name.split('.').pop();
       const randomName = `${Math.random().toString(36).substring(2)}.${ext}`;
-
       let { error: uploadError } = await supabase
         .storage
         .from('attachments')
@@ -273,7 +306,7 @@ function ChatRoom({ session, onShowProfile }) {
       file_type = selectedFile.type;
     }
 
-    // Inserisco messaggio
+    // Inserisci messaggio
     await supabase
       .from('messages')
       .insert([{
@@ -289,7 +322,7 @@ function ChatRoom({ session, onShowProfile }) {
     setSelectedFile(null);
   };
 
-  // ---------- 17) REAZIONI (DOPPIO CLICK) -----------
+  // ========== 6) REAZIONI (doppio click) ===============
   const handleMessageDoubleClick = (e, msg) => {
     setReactionMenu({
       x: e.clientX,
@@ -297,7 +330,6 @@ function ChatRoom({ session, onShowProfile }) {
       message: msg,
     });
   };
-
   const handleReaction = async (msg, symbol) => {
     await supabase
       .from('reactions')
@@ -305,10 +337,8 @@ function ChatRoom({ session, onShowProfile }) {
     setReactionMenu(null);
   };
 
-  // ---------- 18) INVITA UTENTE -----------
-  const openInviteModal = () => {
-    setInviteModalOpen(true);
-  };
+  // ========== 7) INVITA UTENTE ===============
+  const openInviteModal = () => setInviteModalOpen(true);
   const closeInviteModal = () => {
     setInviteEmail('');
     setInviteModalOpen(false);
@@ -321,13 +351,12 @@ function ChatRoom({ session, onShowProfile }) {
       .eq('email', inviteEmail)
       .maybeSingle();
     if (error || !profileData) {
-      alert('Utente non trovato in profiles');
+      alert('Utente non trovato.');
       return;
     }
-    const userId = profileData.id;
-    const { error: memError } = await supabase
+    let { error: memError } = await supabase
       .from('room_members')
-      .insert([{ room_id: selectedRoom.id, user_id: userId, status: 'pending' }]);
+      .insert([{ room_id: selectedRoom.id, user_id: profileData.id, status: 'pending' }]);
     if (!memError) {
       alert('Invito inviato con successo!');
       closeInviteModal();
@@ -335,17 +364,17 @@ function ChatRoom({ session, onShowProfile }) {
     }
   };
 
-  // ---------- 19) REGISTRAZIONE VOCALE -----------
+  // ========== 8) REGISTRAZIONE VOCALE ===============
   const startRecording = async () => {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      alert('La registrazione audio non è supportata dal tuo browser.');
+      alert('Registrazione non supportata.');
       return;
     }
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const recorder = new MediaRecorder(stream);
     recorder.ondataavailable = (evt) => {
       if (evt.data.size > 0) {
-        setAudioChunks((prev) => [...prev, evt.data]);
+        setAudioChunks(prev => [...prev, evt.data]);
       }
     };
     recorder.start();
@@ -367,44 +396,39 @@ function ChatRoom({ session, onShowProfile }) {
     }
   }, [audioChunks, mediaRecorder]);
 
-  // ---------- 20) PRESENCE E TYPING -----------
+  // ========== 9) PRESENCE & TYPING ===============
   const joinPresenceChannel = async () => {
     const presenceChannel = supabase.channel('online-users', {
       config: {
         presence: { key: session.user.id },
       },
     });
-
     presenceChannel.on('presence', { event: 'sync' }, () => {
       const state = presenceChannel.presenceState();
       const online = Object.keys(state);
       setOnlineUsers(online);
     });
-
-    // ascolta broadcast event "typing"
     presenceChannel.on('broadcast', { event: 'typing' }, ({ payload }) => {
       setTypingUsers(payload.typingUsers);
     });
-
+    // Ascoltiamo anche "call-started" o "call-join" se vuoi
     presenceChannel.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
         presenceChannel.track({ online: true });
       }
     });
-
     presenceChannelRef.current = presenceChannel;
   };
   const handleTyping = (isTyping) => {
-    setTypingUsers((prev) => {
+    setTypingUsers(prev => {
       const copy = new Set(prev);
       if (isTyping) copy.add(session.user.id);
       else copy.delete(session.user.id);
       return [...copy];
     });
-
-    const presenceChannel = presenceChannelRef.current;
-    if (presenceChannel) {
-      presenceChannel.send({
+    const channel = presenceChannelRef.current;
+    if (channel) {
+      channel.send({
         type: 'broadcast',
         event: 'typing',
         payload: {
@@ -416,12 +440,13 @@ function ChatRoom({ session, onShowProfile }) {
     }
   };
 
-  // ---------- 21) CONTEXT MENU (DETTAGLIO, MODIFICA, ELIMINA) -----------
+  // ========== 10) CONTEXT MENU STANZA (dettaglio, etc) ===============
+  const menuRefS = useRef();
+  const reactionRefS = useRef();
   const openRoomContextMenu = (room, x, y) => {
     setContextMenu({ room, x, y });
     setEditRoomName(room.name);
   };
-
   const handleShowChannelDetail = async (room) => {
     const { data, error } = await supabase
       .from('room_members')
@@ -452,7 +477,7 @@ function ChatRoom({ session, onShowProfile }) {
     }
   };
   const handleDeleteRoom = async (room) => {
-    if (!window.confirm('Sei sicuro di voler eliminare questa stanza?')) return;
+    if (!window.confirm('Eliminare questa stanza?')) return;
     await supabase
       .from('rooms')
       .delete()
@@ -464,43 +489,188 @@ function ChatRoom({ session, onShowProfile }) {
     fetchRooms();
   };
 
-  // ---------- 22) BOZZA CHIAMATE (WEBRTC) -----------
-  const pcRef = useRef(null);
-  const [localStream, setLocalStream] = useState(null);
-  const startCall = async () => {
-    // Esempio semplificato
-    pcRef.current = new RTCPeerConnection({ 
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-    });
+   // ========== CHIAMATE DI GRUPPO ===========
+  // Avvia la call => broadcast "call-started"
+  const handleStartGroupCall = async () => {
+    if (!selectedRoom || !presenceChannelRef.current) return;
 
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    setCallActive(true);
+    setCallHostId(session.user.id);
+    setCallParticipants([session.user.id]); // l'host partecipa
+
+    // Ottieni localStream
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
     setLocalStream(stream);
-    stream.getTracks().forEach(track => pcRef.current.addTrack(track, stream));
 
-    const offer = await pcRef.current.createOffer();
-    await pcRef.current.setLocalDescription(offer);
-
-    // Invia "offer" via presenceChannel (o un canale dedicato)
-    if (presenceChannelRef.current) {
-      presenceChannelRef.current.send({
-        type: 'broadcast',
-        event: 'webrtc-offer',
-        payload: { offer }
-      });
-    }
+    presenceChannelRef.current.send({
+      type: 'broadcast',
+      event: 'call-started',
+      payload: { hostId: session.user.id, roomId: selectedRoom.id }
+    });
+    alert('Hai avviato la call. Gli altri possono unirsi.');
   };
 
-  // ---------- 23) RENDER -----------
+  // “Unisciti” => broadcast call-join
+  const handleJoinGroupCall = async () => {
+    if (!selectedRoom || !presenceChannelRef.current) return;
+
+    setCallActive(true);
+    setCallParticipants(prev => {
+      const setNew = new Set(prev);
+      setNew.add(session.user.id);
+      return [...setNew];
+    });
+
+    // ottieni localStream
+    if (!localStream) {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      setLocalStream(stream);
+    }
+
+    presenceChannelRef.current.send({
+      type: 'broadcast',
+      event: 'call-join',
+      payload: { userId: session.user.id, roomId: selectedRoom.id }
+    });
+    alert('Ti sei unito alla call. Scambio offer/answer...');
+  };
+
+  // Crea una RTCPeerConnection con “peerId”
+  function createPeerConnection(peerId, channel) {
+    if (pcMapRef.current[peerId]) {
+      return pcMapRef.current[peerId];
+    }
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    });
+    pcMapRef.current[peerId] = pc;
+
+    // On icecandidate => broadcast "webrtc-ice"
+    pc.onicecandidate = (evt) => {
+      if (evt.candidate) {
+        channel.send({
+          type: 'broadcast',
+          event: 'webrtc-ice',
+          payload: {
+            from: session.user.id,
+            to: peerId,
+            candidate: evt.candidate
+          }
+        });
+      }
+    };
+
+    // On track => mostra video remoto
+    pc.ontrack = (evt) => {
+      console.log(`Ricevuto track da ${peerId}`, evt.streams);
+      // Potresti creare un <video> e riprodurre “evt.streams[0]”
+    };
+
+    return pc;
+  }
+
+  // Genera un Offer verso peerId
+  async function makeOffer(peerId, channel) {
+    const pc = pcMapRef.current[peerId];
+    if (!pc) return;
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    channel.send({
+      type: 'broadcast',
+      event: 'webrtc-offer',
+      payload: {
+        from: session.user.id,
+        to: peerId,
+        sdp: offer
+      }
+    });
+  }
+
+  // Gestisci l’arrivo di un “offer”
+  async function handleOffer(payload, channel) {
+    // Se non è per me, ignoro
+    if (payload.to !== session.user.id) return;
+
+    const { from, sdp } = payload;
+    // Creo pc se non esiste
+    createPeerConnection(from, channel);
+
+    const pc = pcMapRef.current[from];
+    await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+
+    // Aggiungo track locali
+    if (!localStream) {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      setLocalStream(stream);
+      stream.getTracks().forEach(track => {
+        pc.addTrack(track, stream);
+      });
+    } else {
+      localStream.getTracks().forEach(track => {
+        pc.addTrack(track, localStream);
+      });
+    }
+
+    // Creo answer
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    channel.send({
+      type: 'broadcast',
+      event: 'webrtc-answer',
+      payload: {
+        from: session.user.id,
+        to: from,
+        sdp: answer
+      }
+    });
+  }
+
+  // Gestisci arrivo di “answer”
+  async function handleAnswer(payload) {
+    if (payload.to !== session.user.id) return;
+    const { from, sdp } = payload;
+    const pc = pcMapRef.current[from];
+    if (!pc) return;
+    await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+  }
+
+  // Gestisci arrivo di “ice”
+  async function handleIceCandidate(payload) {
+    if (payload.to !== session.user.id) return;
+    const { from, candidate } = payload;
+    const pc = pcMapRef.current[from];
+    if (!pc) return;
+    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+  }
+
+  // RENDER
   return (
-    <div className={`chat-container theme-${theme}`}>
+    <div className={`chat-container ${theme}-theme`}>
       <div className="sidebar">
-        <h3>Chat Rooms</h3>
+        <h3 style={{ marginBottom: '0.5rem' }}>Chat Rooms</h3>
+        
+        {/* Pulsante "Amici" */}
+        <Link
+          to="/friends"
+          style={{
+            display: 'inline-block',
+            textDecoration: 'none',
+            background: '#3498db',
+            color: '#fff',
+            padding: '0.4rem 0.7rem',
+            borderRadius: '4px',
+            marginBottom: '0.5rem',
+            fontSize: '0.85rem',
+            textAlign: 'center'
+          }}
+        >
+          &#128101; Amici
+        </Link>
 
-        {/* Se vuoi un link "Vai alla sezione Amici" con Router:
-           <Link to="/friends">Amici</Link>
-        */}
-
-        <ul>
+        <ul style={{ marginBottom: '0.5rem' }}>
           {rooms.map((room) => (
             <li
               key={room.id}
@@ -525,8 +695,8 @@ function ChatRoom({ session, onShowProfile }) {
           <button onClick={handleCreateRoom}>Crea</button>
         </div>
 
-        <div style={{ marginTop: '1rem' }}>
-          <h4>Utenti online:</h4>
+        <div style={{ marginTop: '0.5rem' }}>
+          <h4 style={{ marginBottom: '0.3rem' }}>Utenti online:</h4>
           <ul>
             {onlineUsers.map(uid => (
               <li key={uid}>
@@ -536,19 +706,27 @@ function ChatRoom({ session, onShowProfile }) {
           </ul>
         </div>
 
-        {/* Footer: Profilo, Impostazioni, Logout */}
-        <div className="sidebar-bottom">
-          <button onClick={onShowProfile} className="profile-button">
+        <div className="sidebar-bottom" style={{ marginTop: '1rem' }}>
+          <button
+            onClick={onShowProfile}
+            className="profile-button"
+            style={{ fontSize: '0.8rem', padding: '0.4rem 0.6rem' }}
+          >
             Profilo
           </button>
-          <button onClick={() => setSettingsOpen(true)} className="settings-button">
-            &#9881; {/* icona ingranaggio ingrandita da CSS */}
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="settings-button"
+            style={{ fontSize: '1rem', padding: '0.4rem 0.6rem' }}
+          >
+            &#9881;
           </button>
           <button
             onClick={async () => {
               await supabase.auth.signOut();
             }}
             className="logout-button"
+            style={{ fontSize: '0.8rem', padding: '0.4rem 0.6rem' }}
           >
             Logout
           </button>
@@ -560,7 +738,7 @@ function ChatRoom({ session, onShowProfile }) {
           <div className="invites-modal">
             <h4>Inviti pendenti</h4>
             <ul>
-              {pendingInvites.map((invite) => (
+              {pendingInvites.map(invite => (
                 <li key={invite.room_id}>
                   {invite.rooms.name}
                   <button onClick={() => handleAcceptInvite(invite)}>Accetta</button>
@@ -575,15 +753,32 @@ function ChatRoom({ session, onShowProfile }) {
           <>
             <h3>{selectedRoom.name}</h3>
 
-            {/* Avvia chiamata WEBRTC */}
-            <button onClick={startCall} style={{ marginLeft: '1rem', marginBottom: '0.5rem' }}>
-              Avvia Chiamata
-            </button>
+            {/* Se la call non è attiva => Avvia, altrimenti "Chiamata attiva" */}
+            {!callActive ? (
+              <button
+                onClick={handleStartGroupCall}
+                style={{ marginBottom: '0.5rem', background: '#16a085', color: '#fff', borderRadius: '4px', border: 'none', padding: '0.4rem 0.8rem' }}
+              >
+                Avvia chiamata di gruppo
+              </button>
+            ) : (
+              <div style={{ marginBottom: '0.5rem' }}>
+                <strong style={{ color: 'green' }}>Chiamata attiva!</strong>{' '}
+                {callHostId !== session.user.id && (
+                  <button
+                    onClick={handleJoinGroupCall}
+                    style={{ marginLeft: '0.5rem', background: '#e67e22', color: '#fff', border: 'none', borderRadius: '4px', padding: '0.3rem 0.6rem' }}
+                  >
+                    Unisciti
+                  </button>
+                )}
+              </div>
+            )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
               <button
                 style={{ background: '#27ae60', color: '#fff', borderRadius: '6px', padding: '0.5rem 1rem', border: 'none' }}
-                onClick={openInviteModal}
+                onClick={() => setInviteModalOpen(true)}
               >
                 Invita
               </button>
@@ -600,7 +795,7 @@ function ChatRoom({ session, onShowProfile }) {
             </div>
 
             <div className="messages">
-              {messages.map((msg) => {
+              {messages.map(msg => {
                 const rawContent = msg.content || '';
                 const highlighted = highlightText(rawContent, searchTerm);
                 return (
@@ -645,7 +840,7 @@ function ChatRoom({ session, onShowProfile }) {
               })}
             </div>
 
-            {/* Barra di invio: icona microfono, icona invio */}
+            {/* Barra invio */}
             <div className="new-message-bar">
               <input
                 type="text"
@@ -659,15 +854,13 @@ function ChatRoom({ session, onShowProfile }) {
                 }}
                 onBlur={() => handleTyping(false)}
               />
-
-              {/* Icona microfono per avviare/fermare la registrazione */}
               {mediaRecorder ? (
                 <button onClick={stopRecording} className="mic-button" title="Stop Recording">
-                  &#128264; {/* o un'icona fontawesome microfono sbarrato */}
+                  &#128264;
                 </button>
               ) : (
                 <button onClick={startRecording} className="mic-button" title="Inizia registrazione vocale">
-                  &#127908; {/* icona microfono */}
+                  &#127908;
                 </button>
               )}
 
@@ -689,7 +882,7 @@ function ChatRoom({ session, onShowProfile }) {
         )}
       </div>
 
-      {/* Context Menu stanza */}
+      {/* Context menu stanza */}
       {contextMenu && (
         <div
           ref={menuRef}
@@ -703,43 +896,34 @@ function ChatRoom({ session, onShowProfile }) {
             placeholder="Nuovo nome stanza"
           />
           <div>
-            <button
-              onClick={() => {
-                handleShowChannelDetail(contextMenu.room);
-                setContextMenu(null);
-              }}
-            >
+            <button onClick={() => {
+              handleShowChannelDetail(contextMenu.room);
+              setContextMenu(null);
+            }}>
               Dettaglio Canale
             </button>
-            <button
-              onClick={() => {
-                handleEditRoom(contextMenu.room, editRoomName);
-                setContextMenu(null);
-              }}
-            >
+            <button onClick={() => {
+              handleEditRoom(contextMenu.room, editRoomName);
+              setContextMenu(null);
+            }}>
               Modifica
             </button>
-            <button
-              onClick={() => {
-                handleDeleteRoom(contextMenu.room);
-                setContextMenu(null);
-              }}
-            >
+            <button onClick={() => {
+              handleDeleteRoom(contextMenu.room);
+              setContextMenu(null);
+            }}>
               Elimina
             </button>
           </div>
         </div>
       )}
 
-      {/* Reaction Menu (double-click) */}
+      {/* Reaction menu */}
       {reactionMenu && (
         <div
           ref={reactionRef}
           className="reaction-menu"
-          style={{
-            top: reactionMenu.y,
-            left: reactionMenu.x,
-          }}
+          style={{ top: reactionMenu.y, left: reactionMenu.x }}
         >
           <button onClick={() => handleReaction(reactionMenu.message, '👍')}>👍</button>
           <button onClick={() => handleReaction(reactionMenu.message, '❤️')}>❤️</button>
@@ -747,7 +931,7 @@ function ChatRoom({ session, onShowProfile }) {
         </div>
       )}
 
-      {/* Modale Invito */}
+      {/* Modale Invita */}
       {inviteModalOpen && (
         <div className="invite-modal">
           <div className="invite-modal-content">
@@ -780,7 +964,7 @@ function ChatRoom({ session, onShowProfile }) {
                   borderRadius: '6px',
                   border: 'none'
                 }}
-                onClick={closeInviteModal}
+                onClick={() => setInviteModalOpen(false)}
               >
                 Annulla
               </button>
@@ -789,13 +973,13 @@ function ChatRoom({ session, onShowProfile }) {
         </div>
       )}
 
-      {/* Dettaglio Canale */}
+      {/* Dettaglio canale */}
       {showChannelDetail && (
         <div className="channel-detail-modal">
           <div className="channel-detail-content">
             <h4>Dettaglio Canale</h4>
             <ul>
-              {channelMembers.map((m) => (
+              {channelMembers.map(m => (
                 <li key={m.id}>
                   {m.email} {m.role === 'admin' && <strong>(Admin)</strong>}
                 </li>
@@ -806,7 +990,7 @@ function ChatRoom({ session, onShowProfile }) {
         </div>
       )}
 
-      {/* Modale Settings: multi-tema */}
+      {/* Modale impostazioni: multi-tema */}
       {settingsOpen && (
         <div className="settings-modal">
           <div className="settings-content">

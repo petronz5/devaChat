@@ -153,6 +153,16 @@
     background: #2c2c2c;
     color: #f0f0f0;
   }
+
+  /* Puoi aggiungere altri temi, per esempio: */
+  .theme-blue .chat-content {
+    background: #e0f7fa;
+    color: #004d40;
+  }
+  .theme-pink .chat-content {
+    background: #fff0f6;
+    color: #880e4f;
+  }
   
   .chat-content h3 {
     margin-top: 0;
