@@ -1,257 +1,145 @@
 // src/ChatRoom.js
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
+import './ChatRoom.css';
+import FriendsSection from './FriendsSection'; // <--- Import del componente amici
 
-function ChatRoom({ session }) {
+function ChatRoom({ session, onShowProfile }) {
   const [rooms, setRooms] = useState([]);
   const [selectedRoom, setSelectedRoom] = useState(null);
-  const [newRoomName, setNewRoomName] = useState('');
-  const [newMessage, setNewMessage] = useState('');
-  const [messages, setMessages] = useState([]);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [roomMembers, setRoomMembers] = useState([]);
-  const [pendingInvites, setPendingInvites] = useState([]);
-  const [contextMenu, setContextMenu] = useState(null); // { room, x, y }
-  const [editRoomName, setEditRoomName] = useState('');
-  const [selectedFile, setSelectedFile] = useState(null);
-  
-  const menuRef = useRef();
 
-  // Chiude il menu contestuale se si clicca fuori
+  // Per creare una nuova stanza
+  const [newRoomName, setNewRoomName] = useState('');
+
+  // Messaggi, search e highlight
+  const [messages, setMessages] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  // File allegato
+  const [selectedFile, setSelectedFile] = useState(null);
+
+  // Realtime presence e typing
+  const [typingUsers, setTypingUsers] = useState([]);
+  const [onlineUsers, setOnlineUsers] = useState([]);
+  const presenceChannelRef = useRef(null); // Per salvare il canale
+
+  // Reazioni (doppio click)
+  const [reactionMenu, setReactionMenu] = useState(null);
+
+  // Modali per invito
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+
+  // Inviti pendenti
+  const [pendingInvites, setPendingInvites] = useState([]);
+
+  // Stato new message
+  const [newMessage, setNewMessage] = useState('');
+
+  // Context menu (Dettaglio, Modifica, Elimina)
+  const [contextMenu, setContextMenu] = useState(null);
+  const [editRoomName, setEditRoomName] = useState('');
+
+  // Stato per la modale di "Dettaglio Canale"
+  const [showChannelDetail, setShowChannelDetail] = useState(false);
+  const [channelMembers, setChannelMembers] = useState([]);
+
+  // Registrazione vocale
+  const [mediaRecorder, setMediaRecorder] = useState(null);
+  const [audioChunks, setAudioChunks] = useState([]);
+
+  // Settings (tema scuro/chiaro)
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
+
+  // Riferimenti per chiudere menu
+  const menuRef = useRef();
+  const reactionRef = useRef();
+
+  useEffect(() => {
+    if (session) {
+      fetchRooms();
+      fetchInvitations();
+      joinPresenceChannel();
+    }
+    return () => {
+      supabase.removeAllChannels();
+    };
+    // eslint-disable-next-line
+  }, [session]);
+
+  // Chiude i menu se clicco fuori
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
         setContextMenu(null);
       }
+      if (reactionRef.current && !reactionRef.current.contains(e.target)) {
+        setReactionMenu(null);
+      }
     };
     window.addEventListener('click', handleClickOutside);
-    return () => window.removeEventListener('click', handleClickOutside);
+    return () => {
+      window.removeEventListener('click', handleClickOutside);
+    };
   }, []);
 
-  // Carica stanze e inviti
-  useEffect(() => {
-    if (session) {
-      fetchRooms();
-      fetchInvitations();
-    }
-  }, [session]);
-
+  // -----------
+  // 1) Rooms
+  // -----------
   const fetchRooms = async () => {
-    let { data, error } = await supabase
+    const { data, error } = await supabase
       .from('room_members')
       .select('room_id, rooms!inner(id, name, created_by)')
       .eq('user_id', session.user.id)
       .eq('status', 'accepted');
-    if (error) {
-      console.error(error);
-    } else if (data) {
-      const roomsData = data.map((item) => item.rooms);
-      console.log("Rooms fetched:", roomsData);
-      setRooms(roomsData);
+
+    if (!error && data) {
+      const r = data.map((item) => item.rooms);
+      setRooms(r);
     }
   };
 
-  const fetchInvitations = async () => {
-    let { data, error } = await supabase
-      .from('room_members')
-      .select('room_id, rooms!inner(id, name)')
-      .eq('user_id', session.user.id)
-      .eq('status', 'pending');
-    if (error) {
-      console.error("fetchInvitations:", error);
-    } else {
-      console.log("Invitations fetched:", data);
-      setPendingInvites(data || []);
-    }
-  };
-
-  // Crea una nuova stanza e inserisce il creatore in room_members con ruolo "admin" e status "accepted"
   const handleCreateRoom = async () => {
     if (!newRoomName) return;
     let { data, error } = await supabase
       .from('rooms')
       .insert([{ name: newRoomName, created_by: session.user.id }])
-      .select('*');
-    console.log("Data returned:", data);
-    if (error) {
-      console.error(error);
-      return;
-    }
-    if (!data || data.length === 0) {
-      console.error("Nessun record restituito");
-      return;
-    }
+      .select();
+    if (error || !data || data.length === 0) return;
+
     const room = data[0];
-    let { error: memError } = await supabase
+    const { error: memErr } = await supabase
       .from('room_members')
-      .insert([{ room_id: room.id, user_id: session.user.id, role: 'admin', status: 'accepted' }], { returning: 'minimal' });
-    if (memError) {
-      console.error(memError);
-      return;
+      .insert([{ room_id: room.id, user_id: session.user.id, role: 'admin', status: 'accepted' }]);
+    if (!memErr) {
+      setNewRoomName('');
+      fetchRooms();
     }
-    setNewRoomName('');
-    fetchRooms();
   };
 
-  // Recupera i messaggi con join sulla tabella profiles per mostrare l'email del mittente e allegati
-  const fetchMessages = async (roomId) => {
-    let { data, error } = await supabase
-      .from('messages')
-      .select('id, room_id, user_id, content, attachment_url, created_at, profiles!inner(email)')
-      .eq('room_id', roomId)
-      .order('created_at', { ascending: true });
-    if (error) {
-      console.error(error);
-      return;
-    }
-    setMessages(data);
-  };
-
-  // Recupera i membri della stanza con join sulla tabella profiles
-  const fetchRoomMembers = async (roomId) => {
-    let { data, error } = await supabase
+  // -----------
+  // 2) Inviti
+  // -----------
+  const fetchInvitations = async () => {
+    const { data, error } = await supabase
       .from('room_members')
-      .select('user_id, role, status, profiles!inner(id, email)')
-      .eq('room_id', roomId)
-      .eq('status', 'accepted');
-    if (error) {
-      console.error(error);
-      return;
-    }
-    const members = data.map((item) => ({ ...item.profiles, role: item.role }));
-    setRoomMembers(members);
-  };
-
-  // Verifica se l'utente corrente è admin nella stanza selezionata
-  const isAdmin = () => {
-    return roomMembers.some(member => member.id === session.user.id && member.role === 'admin');
-  };
-
-  // Seleziona una stanza, carica messaggi, membri e si iscrive al canale realtime
-  const handleSelectRoom = async (room) => {
-    setSelectedRoom(room);
-    fetchMessages(room.id);
-    fetchRoomMembers(room.id);
-
-    const channel = supabase.channel(`room-${room.id}`, {
-      config: { broadcast: { ack: true } },
-    });
-    channel.on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `room_id=eq.${room.id}`,
-      },
-      (payload) => {
-        setMessages((prev) => [...prev, payload.new]);
-      }
-    );
-    channel.subscribe();
-  };
-
-  // Invia un nuovo messaggio (se è presente un file allegato, lo gestisce)
-  const handleSendMessage = async () => {
-    // Se non c'è né un testo né un file, non fare nulla
-    if (!newMessage && !selectedFile) return;
-  
-    let attachment_url = null;
-    let file_type = null;
-    let file_name = null;
-  
-    // Se è stato selezionato un file, caricalo nello storage
-    if (selectedFile) {
-      // Crea un nome casuale per il file (puoi personalizzarlo)
-      const fileExt = selectedFile.name.split('.').pop();
-      const randomFileName = `${Math.random().toString(36).substring(2)}.${fileExt}`;
-      const filePath = randomFileName;
-  
-      // Carica il file nel bucket "attachments"
-      let { data: uploadData, error: uploadError } = await supabase
-        .storage
-        .from('attachments')
-        .upload(filePath, selectedFile);
-      if (uploadError) {
-        console.error("Upload error:", uploadError.message);
-        return;
-      }
-  
-      // Ottieni l'URL pubblico del file
-      const { publicURL, error: urlError } = supabase
-        .storage
-        .from('attachments')
-        .getPublicUrl(filePath);
-      if (urlError) {
-        console.error("URL error:", urlError.message);
-        return;
-      }
-      attachment_url = publicURL;
-      file_type = selectedFile.type;
-      file_name = selectedFile.name;
-    }
-  
-    // Inserisci il messaggio nella tabella messages.
-    // Se non c'è testo, inserisci una stringa vuota.
-    let { error } = await supabase
-      .from('messages')
-      .insert([
-        {
-          room_id: selectedRoom.id,
-          user_id: session.user.id,
-          content: newMessage || '',
-          attachment_url,
-          file_type,
-          file_name,
-        },
-      ]);
-    if (error) {
-      console.error("Errore nell'inserimento del messaggio:", error);
-    }
-    setNewMessage('');
-    setSelectedFile(null);
-  };
-  
-
-  // Invita un utente alla stanza: inserisce un record in room_members con status "pending"
-  const handleInviteUser = async () => {
-    if (!inviteEmail || !selectedRoom) return;
-    let { data: profileData, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('email', inviteEmail)
-      .maybeSingle();
-    console.log("Profile found:", profileData, error);
-    if (error || !profileData) {
-      alert("Utente non trovato nella tabella profiles.");
-      return;
-    }
-    let userId = profileData.id;
-    let { error: memError } = await supabase
-      .from('room_members')
-      .insert([{ room_id: selectedRoom.id, user_id: userId, status: 'pending' }]);
-    if (memError) {
-      console.error("Errore nell'invito:", memError);
-    } else {
-      alert("Invito inviato con successo!");
-      setInviteEmail('');
-      fetchInvitations();
+      .select('room_id, rooms!inner(id, name)')
+      .eq('user_id', session.user.id)
+      .eq('status', 'pending');
+    if (!error && data) {
+      setPendingInvites(data);
     }
   };
 
-  // Gestione degli inviti pendenti: l'utente invitato può accettare o rifiutare
   const handleAcceptInvite = async (invite) => {
-    let { data, error } = await supabase
+    const { data, error } = await supabase
       .from('room_members')
       .update({ status: 'accepted' })
       .eq('room_id', invite.room_id)
       .eq('user_id', session.user.id)
       .select();
-    console.log("Accept invite result:", data, error);
-    if (error || !data || data.length === 0) {
-      alert("Errore nell'accettazione dell'invito");
-      return;
-    } else {
+    if (!error && data && data.length > 0) {
       alert(`Hai accettato l'invito per la stanza ${invite.rooms.name}`);
       fetchInvitations();
       fetchRooms();
@@ -259,103 +147,342 @@ function ChatRoom({ session }) {
   };
 
   const handleDeclineInvite = async (invite) => {
-    let { error } = await supabase
+    const { error } = await supabase
       .from('room_members')
       .delete()
       .eq('room_id', invite.room_id)
       .eq('user_id', session.user.id);
-    if (error) {
-      console.error("Errore nel rifiuto:", error);
-    } else {
+    if (!error) {
       alert(`Hai rifiutato l'invito per la stanza ${invite.rooms.name}`);
       fetchInvitations();
     }
   };
 
-  // Solo admin può modificare il nome della stanza
-  const handleEditRoom = async (room, newName) => {
-    if (!newName) return;
-    if (!isAdmin()) {
-      alert("Solo l'admin può modificare la stanza!");
-      return;
-    }
-    let { error } = await supabase
-      .from('rooms')
-      .update({ name: newName })
-      .eq('id', room.id);
-    if (error) {
-      console.error("Errore nell'aggiornamento della stanza:", error);
-    } else {
-      alert("Stanza modificata con successo!");
-      fetchRooms();
-      if (selectedRoom && selectedRoom.id === room.id) {
-        setSelectedRoom({ ...selectedRoom, name: newName });
-      }
+  // -----------
+  // 3) Selezione stanza & Messaggi
+  // -----------
+  const handleSelectRoom = async (room) => {
+    setSelectedRoom(room);
+    await loadMessages(room.id);
+
+    // Rimuovo canali precedenti
+    supabase.removeAllChannels();
+
+    // Sottoscrizione realtime
+    const channel = supabase.channel(`room-${room.id}`, {
+      config: { broadcast: { ack: true } },
+    });
+
+    // Su insert di un messaggio
+    channel.on('postgres_changes', {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'messages',
+      filter: `room_id=eq.${room.id}`,
+    }, (payload) => {
+      const newMsg = payload.new;
+      setMessages((prev) => [...prev, newMsg]); // Aggiorno lo stato in tempo reale
+    });
+
+    // Reazioni
+    channel.on('postgres_changes', {
+      event: 'INSERT',
+      schema: 'public',
+      table: 'reactions',
+    }, () => {
+      loadMessages(room.id);
+    });
+
+    channel.subscribe();
+  };
+
+  const loadMessages = async (roomId) => {
+    const { data, error } = await supabase
+      .from('messages')
+      .select(`
+        id, room_id, user_id, content, attachment_url,
+        file_name, file_type, created_at,
+        profiles!inner(email)
+      `)
+      .eq('room_id', roomId)
+      .order('created_at', { ascending: true });
+    if (!error && data) {
+      setMessages(data);
     }
   };
 
-  // Solo admin può eliminare la stanza
-  const handleDeleteRoom = async (room) => {
-    if (!isAdmin()) {
-      alert("Solo l'admin può eliminare la stanza!");
-      return;
-    }
-    if (!window.confirm("Sei sicuro di voler eliminare questa stanza?")) return;
-    let { error } = await supabase
-      .from('rooms')
-      .delete()
-      .eq('id', room.id);
-    if (error) {
-      console.error("Errore nell'eliminazione della stanza:", error);
-    } else {
-      alert("Stanza eliminata con successo!");
-      if (selectedRoom && selectedRoom.id === room.id) {
-        setSelectedRoom(null);
-        setMessages([]);
-        setRoomMembers([]);
-      }
-      fetchRooms();
-    }
+  // -----------
+  // 4) Ricerca & evidenziare (live)
+  // -----------
+  const highlightText = (text, term) => {
+    if (!term) return text;
+    const regex = new RegExp(`(${term})`, 'gi');
+    return text.replace(regex, `<mark>$1</mark>`);
   };
 
-  // Solo admin può rimuovere un utente dalla stanza (non se stesso)
-  const handleRemoveUser = async (userId) => {
-    if (!isAdmin()) {
-      alert("Solo l'admin può rimuovere utenti!");
+  // -----------
+  // 5) Invia messaggi / Allegati
+  // -----------
+  const handleSendMessage = async () => {
+    if (!selectedRoom || (!newMessage && !selectedFile)) return;
+
+    let attachment_url = null;
+    let file_name = null;
+    let file_type = null;
+
+    if (selectedFile) {
+      const ext = selectedFile.name.split('.').pop();
+      const randomName = `${Math.random().toString(36).substring(2)}.${ext}`;
+      let { error: uploadError } = await supabase
+        .storage
+        .from('attachments')
+        .upload(randomName, selectedFile);
+      if (uploadError) return;
+
+      const { data: publicData, error: urlError } = supabase
+        .storage
+        .from('attachments')
+        .getPublicUrl(randomName);
+      if (urlError) return;
+
+      attachment_url = publicData.publicUrl;
+      file_name = selectedFile.name;
+      file_type = selectedFile.type;
+    }
+
+    await supabase
+      .from('messages')
+      .insert([{
+        room_id: selectedRoom.id,
+        user_id: session.user.id,
+        content: newMessage,
+        attachment_url,
+        file_name,
+        file_type,
+      }]);
+
+    setNewMessage('');
+    setSelectedFile(null);
+  };
+
+  // -----------
+  // 6) Reazioni con doppio click
+  // -----------
+  const handleMessageDoubleClick = (e, msg) => {
+    setReactionMenu({
+      x: e.clientX,
+      y: e.clientY,
+      message: msg,
+    });
+  };
+
+  const handleReaction = async (msg, symbol) => {
+    await supabase
+      .from('reactions')
+      .insert([{ message_id: msg.id, user_id: session.user.id, reaction: symbol }]);
+    setReactionMenu(null);
+  };
+
+  // -----------
+  // 7) Invito (modale)
+  // -----------
+  const openInviteModal = () => {
+    setInviteModalOpen(true);
+  };
+
+  const closeInviteModal = () => {
+    setInviteEmail('');
+    setInviteModalOpen(false);
+  };
+
+  const handleSendInvite = async () => {
+    if (!inviteEmail || !selectedRoom) return;
+    const { data: profileData, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('email', inviteEmail)
+      .maybeSingle();
+    if (error || !profileData) {
+      alert('Utente non trovato in profiles.');
       return;
     }
-    if (userId === session.user.id) {
-      alert("Non puoi rimuovere te stesso!");
-      return;
-    }
-    let { error } = await supabase
+    const userId = profileData.id;
+    const { error: memError } = await supabase
       .from('room_members')
-      .delete()
-      .eq('room_id', selectedRoom.id)
-      .eq('user_id', userId);
-    if (error) {
-      console.error("Errore nella rimozione dell'utente:", error);
-    } else {
-      alert("Utente rimosso con successo!");
-      fetchRoomMembers(selectedRoom.id);
+      .insert([{ room_id: selectedRoom.id, user_id: userId, status: 'pending' }]);
+    if (!memError) {
+      alert('Invito inviato con successo!');
+      closeInviteModal();
+      fetchInvitations();
     }
   };
 
-  // Gestisce il menu contestuale (tasto destro) sulle stanze
+  // -----------
+  // 8) Registrazione vocale
+  // -----------
+  const startRecording = async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert('La registrazione audio non è supportata dal tuo browser.');
+      return;
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (evt) => {
+      if (evt.data.size > 0) {
+        setAudioChunks((prev) => [...prev, evt.data]);
+      }
+    };
+    recorder.start();
+    setMediaRecorder(recorder);
+    setAudioChunks([]);
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder) {
+      mediaRecorder.stop();
+      setMediaRecorder(null);
+    }
+  };
+
+  useEffect(() => {
+    if (audioChunks.length > 0 && !mediaRecorder) {
+      const blob = new Blob(audioChunks, { type: 'audio/mpeg' });
+      const file = new File([blob], `voice_${Date.now()}.mp3`, { type: 'audio/mpeg' });
+      setSelectedFile(file);
+      setAudioChunks([]);
+    }
+  }, [audioChunks, mediaRecorder]);
+
+  // -----------
+  // 9) Presence e typing
+  // -----------
+  const joinPresenceChannel = async () => {
+    const presenceChannel = supabase.channel('online-users', {
+      config: {
+        presence: { key: session.user.id },
+      },
+    });
+
+    presenceChannel.on('presence', { event: 'sync' }, () => {
+      const state = presenceChannel.presenceState();
+      const online = Object.keys(state);
+      setOnlineUsers(online);
+    });
+
+    // Ascoltiamo broadcast eventuali (typing) -> v2 usa "on('broadcast')"
+    presenceChannel.on('broadcast', { event: 'typing' }, ({ payload }) => {
+      setTypingUsers(payload.typingUsers);
+    });
+
+    presenceChannel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        presenceChannel.track({ online: true });
+      }
+    });
+
+    presenceChannelRef.current = presenceChannel;
+  };
+
+  const handleTyping = (isTyping) => {
+    setTypingUsers((prev) => {
+      const copy = new Set(prev);
+      if (isTyping) copy.add(session.user.id);
+      else copy.delete(session.user.id);
+      return [...copy];
+    });
+
+    const presenceChannel = presenceChannelRef.current;
+    if (presenceChannel) {
+      presenceChannel.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: {
+          typingUsers: isTyping
+            ? [...typingUsers, session.user.id]
+            : typingUsers.filter(id => id !== session.user.id),
+        }
+      });
+    }
+  };
+
+  // -----------
+  // 10) Context menu (Dettaglio, Modifica, Elimina)
+  // -----------
   const openRoomContextMenu = (room, x, y) => {
     setContextMenu({ room, x, y });
     setEditRoomName(room.name);
   };
 
+  const handleShowChannelDetail = async (room) => {
+    const { data, error } = await supabase
+      .from('room_members')
+      .select('profiles!inner(id, email), role')
+      .eq('room_id', room.id)
+      .eq('status', 'accepted');
+    if (!error && data) {
+      const members = data.map(d => ({
+        id: d.profiles.id,
+        email: d.profiles.email,
+        role: d.role,
+      }));
+      setChannelMembers(members);
+      setShowChannelDetail(true);
+    }
+  };
+
+  const handleEditRoom = async (room, newName) => {
+    if (!newName) return;
+    const { error } = await supabase
+      .from('rooms')
+      .update({ name: newName })
+      .eq('id', room.id);
+    if (!error) {
+      if (selectedRoom && selectedRoom.id === room.id) {
+        setSelectedRoom({ ...selectedRoom, name: newName });
+      }
+      fetchRooms();
+    }
+  };
+
+  const handleDeleteRoom = async (room) => {
+    if (!window.confirm('Sei sicuro di voler eliminare questa stanza?')) return;
+    await supabase
+      .from('rooms')
+      .delete()
+      .eq('id', room.id);
+    if (selectedRoom && selectedRoom.id === room.id) {
+      setSelectedRoom(null);
+      setMessages([]);
+    }
+    fetchRooms();
+  };
+
+  // -----------
+  // 11) Settings (tema scuro/chiaro)
+  // -----------
+  const handleToggleTheme = () => {
+    setDarkMode(!darkMode);
+  };
+
+  // -----------
+  // 12) Logout
+  // -----------
   const handleLogout = async () => {
     await supabase.auth.signOut();
   };
 
+  // -----------
+  // Render
+  // -----------
   return (
-    <div className="chat-container">
+    <div className={`chat-container ${darkMode ? 'dark-theme' : ''}`}>
+      {/* SIDEBAR */}
       <div className="sidebar">
         <h3>Chat Rooms</h3>
-        <button onClick={handleLogout}>Logout</button>
+
+        {/* SEZIONE AMICI in un componente */}
+        <FriendsSection session={session} />
+
         <ul>
           {rooms.map((room) => (
             <li
@@ -370,6 +497,7 @@ function ChatRoom({ session }) {
             </li>
           ))}
         </ul>
+
         <div className="new-room">
           <input
             type="text"
@@ -379,9 +507,29 @@ function ChatRoom({ session }) {
           />
           <button onClick={handleCreateRoom}>Crea</button>
         </div>
+
+        <div style={{ marginTop: '1rem' }}>
+          <h4>Utenti online:</h4>
+          <ul>
+            {onlineUsers.map(uid => (
+              <li key={uid}>{uid === session.user.id ? 'Tu' : uid}</li>
+            ))}
+          </ul>
+        </div>
+
+        {/* Footer buttons: Profilo, Logout, Settings */}
+        <div className="sidebar-bottom">
+          <button onClick={onShowProfile} className="profile-button">Profilo</button>
+          <button onClick={() => setSettingsOpen(true)} className="settings-button">
+            &#9881; {/* icona ingranaggio base */}
+          </button>
+          <button onClick={handleLogout} className="logout-button">Logout</button>
+        </div>
       </div>
+
+      {/* CHAT */}
       <div className="chat-content">
-        {/* Se ci sono inviti pendenti, mostra una modale */}
+        {/* Inviti pendenti */}
         {pendingInvites.length > 0 && (
           <div className="invites-modal">
             <h4>Inviti pendenti</h4>
@@ -396,59 +544,111 @@ function ChatRoom({ session }) {
             </ul>
           </div>
         )}
+
         {selectedRoom ? (
           <>
             <h3>{selectedRoom.name}</h3>
-            <div className="room-members">
-              <h4>Utenti nella stanza:</h4>
-              <ul>
-                {roomMembers.map((member) => (
-                  <li key={member.id}>
-                    {member.email} {member.role === 'admin' && <strong>(Admin)</strong>}
-                    {isAdmin() && member.id !== session.user.id && (
-                      <button onClick={() => handleRemoveUser(member.id)}>Rimuovi</button>
-                    )}
-                  </li>
-                ))}
-              </ul>
+
+            {/* Pulsante Invita (apre modale) */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+              <button
+                style={{ background: '#27ae60', color: '#fff', borderRadius: '6px', padding: '0.5rem 1rem', border: 'none' }}
+                onClick={openInviteModal}
+              >
+                Invita
+              </button>
             </div>
-            <div className="invite">
-              <input
-                type="email"
-                placeholder="Invita utente via email"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-              />
-              <button onClick={handleInviteUser}>Invita</button>
-            </div>
-            <div className="messages">
-              {messages.map((msg) => (
-                <div key={msg.id} className={`message ${msg.user_id === session.user.id ? 'own' : ''}`}>
-                  <p>
-                    <strong>
-                      {msg.profiles && msg.profiles.email ? msg.profiles.email : 'Sconosciuto'}:
-                    </strong> {msg.content}
-                  </p>
-                  {msg.attachment_url && (
-                    <div className="attachment">
-                      <a href={msg.attachment_url} target="_blank" rel="noopener noreferrer">Visualizza allegato</a>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className="new-message">
+
+            {/* Ricerca live (niente bottone) */}
+            <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'center' }}>
               <input
                 type="text"
-                placeholder="Scrivi un messaggio"
+                placeholder="Cerca nei messaggi..."
+                style={{ width: '60%', borderRadius: '8px', padding: '0.5rem' }}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+
+            <div className="messages">
+              {messages.map((msg) => {
+                const rawContent = msg.content || '';
+                const highlighted = highlightText(rawContent, searchTerm);
+
+                return (
+                  <div
+                    key={msg.id}
+                    className={`message ${msg.user_id === session.user.id ? 'own' : ''}`}
+                    onDoubleClick={(e) => handleMessageDoubleClick(e, msg)}
+                  >
+                    <p
+                      dangerouslySetInnerHTML={{
+                        __html: `<strong>${msg.profiles?.email || 'Sconosciuto'}:</strong> ${highlighted}`,
+                      }}
+                    />
+                    {msg.attachment_url && (
+                      <div className="attachment">
+                        {msg.file_type?.startsWith('audio') ? (
+                          <audio controls src={msg.attachment_url}>Audio non supportato</audio>
+                        ) : (
+                          <>
+                            <a
+                              href={msg.attachment_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ marginRight: '10px' }}
+                            >
+                              Visualizza
+                            </a>
+                            <a
+                              href={msg.attachment_url}
+                              download={msg.file_name || true}
+                            >
+                              Scarica
+                            </a>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Barra di invio messaggi, centrata e curvata */}
+            <div className="new-message-bar">
+              <input
+                type="text"
+                className="message-input"
+                placeholder="Scrivi un messaggio..."
                 value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
+                onChange={(e) => {
+                  setNewMessage(e.target.value);
+                  handleTyping(true);
+                  if (e.target.value === '') handleTyping(false);
+                }}
+                onBlur={() => handleTyping(false)}
               />
               <input
                 type="file"
+                className="file-input"
                 onChange={(e) => setSelectedFile(e.target.files[0])}
               />
-              <button onClick={handleSendMessage}>Invia</button>
+              <button
+                className="send-button"
+                onClick={handleSendMessage}
+              >
+                Invia
+              </button>
+            </div>
+
+            {/* Registrazione vocale */}
+            <div style={{ marginTop: '1rem', textAlign: 'center' }}>
+              {mediaRecorder ? (
+                <button onClick={stopRecording}>Stop Recording</button>
+              ) : (
+                <button onClick={startRecording}>Record Voice</button>
+              )}
             </div>
           </>
         ) : (
@@ -457,41 +657,126 @@ function ChatRoom({ session }) {
           </div>
         )}
       </div>
+
+      {/* Context menu (Dettaglio, Modifica, Elimina) */}
       {contextMenu && (
         <div
           ref={menuRef}
-          style={{
-            position: 'absolute',
-            top: contextMenu.y,
-            left: contextMenu.x,
-            background: '#fff',
-            border: '1px solid #ccc',
-            borderRadius: '4px',
-            zIndex: 1000,
-            padding: '0.5rem',
-          }}
+          className="context-menu"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
         >
-          <div style={{ marginBottom: '0.5rem' }}>
-            <input
-              type="text"
-              value={editRoomName}
-              onChange={(e) => setEditRoomName(e.target.value)}
-              placeholder="Nuovo nome stanza"
-            />
-          </div>
+          <input
+            type="text"
+            value={editRoomName}
+            onChange={(e) => setEditRoomName(e.target.value)}
+            placeholder="Nuovo nome stanza"
+          />
           <div>
-            <button onClick={() => {
-              handleEditRoom(contextMenu.room, editRoomName);
-              setContextMenu(null);
-            }}>
+            <button
+              onClick={() => {
+                handleShowChannelDetail(contextMenu.room);
+                setContextMenu(null);
+              }}
+            >
+              Dettaglio Canale
+            </button>
+            <button
+              onClick={() => {
+                handleEditRoom(contextMenu.room, editRoomName);
+                setContextMenu(null);
+              }}
+            >
               Modifica
             </button>
-            <button onClick={() => {
-              handleDeleteRoom(contextMenu.room);
-              setContextMenu(null);
-            }}>
+            <button
+              onClick={() => {
+                handleDeleteRoom(contextMenu.room);
+                setContextMenu(null);
+              }}
+            >
               Elimina
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Menu reazioni (doppio click) */}
+      {reactionMenu && (
+        <div
+          ref={reactionRef}
+          className="reaction-menu"
+          style={{
+            top: reactionMenu.y,
+            left: reactionMenu.x,
+          }}
+        >
+          <button onClick={() => handleReaction(reactionMenu.message, '👍')}>👍</button>
+          <button onClick={() => handleReaction(reactionMenu.message, '❤️')}>❤️</button>
+          <button onClick={() => handleReaction(reactionMenu.message, '😂')}>😂</button>
+        </div>
+      )}
+
+      {/* Modale Invito */}
+      {inviteModalOpen && (
+        <div className="invite-modal">
+          <div className="invite-modal-content">
+            <h3>Invita Utente</h3>
+            <input
+              type="email"
+              placeholder="Email utente"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+            />
+            <div style={{ marginTop: '1rem' }}>
+              <button
+                style={{ marginRight: '0.5rem', background: '#5563DE', color: '#fff', padding: '0.5rem 1rem', borderRadius: '6px', border: 'none' }}
+                onClick={handleSendInvite}
+              >
+                Invia Invito
+              </button>
+              <button
+                style={{ background: '#aaa', color: '#fff', padding: '0.5rem 1rem', borderRadius: '6px', border: 'none' }}
+                onClick={closeInviteModal}
+              >
+                Annulla
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dettaglio Canale */}
+      {showChannelDetail && (
+        <div className="channel-detail-modal">
+          <div className="channel-detail-content">
+            <h4>Dettaglio Canale</h4>
+            <ul>
+              {channelMembers.map((m) => (
+                <li key={m.id}>
+                  {m.email} {m.role === 'admin' && <strong>(Admin)</strong>}
+                </li>
+              ))}
+            </ul>
+            <button onClick={() => setShowChannelDetail(false)}>Chiudi</button>
+          </div>
+        </div>
+      )}
+
+      {/* Schermata Settings */}
+      {settingsOpen && (
+        <div className="settings-modal">
+          <div className="settings-content">
+            <h3>Impostazioni</h3>
+            <div className="theme-switch">
+              <label htmlFor="themeToggle">Tema scuro</label>
+              <input
+                id="themeToggle"
+                type="checkbox"
+                checked={darkMode}
+                onChange={handleToggleTheme}
+              />
+            </div>
+            <button onClick={() => setSettingsOpen(false)}>Chiudi</button>
           </div>
         </div>
       )}

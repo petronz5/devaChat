@@ -1,0 +1,452 @@
+/* src/ChatRoom.css */
+
+/* Tema scuro */
+.dark-theme {
+    background: #2c2c2c;
+    color: #f0f0f0;
+  }
+  
+  /* Layout principale */
+  .chat-container {
+    display: flex;
+    flex: 1;
+    margin: 1rem;
+    background: #fff;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    position: relative;
+  }
+  
+  /* Scuro - override base */
+  .dark-theme.chat-container {
+    background: #1f1f1f;
+  }
+  
+  /* SIDEBAR */
+  .sidebar {
+    width: 280px;
+    background: #f7f7f7;
+    padding: 1.25rem;
+    overflow-y: auto;
+    border-right: 1px solid #ddd;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .dark-theme .sidebar {
+    background: #333;
+    color: #fff;
+    border-right: 1px solid #444;
+  }
+  
+  .sidebar h3 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    text-align: center;
+    color: #333;
+    font-size: 1.3rem;
+  }
+  
+  .dark-theme .sidebar h3 {
+    color: #fff;
+  }
+  
+  /* Elenco stanze */
+  .sidebar ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    flex: 1; /* occupy space */
+  }
+  
+  .sidebar li {
+    padding: 0.6rem 0.8rem;
+    border-radius: 5px;
+    cursor: pointer;
+    margin-bottom: 0.3rem;
+    transition: background 0.3s ease;
+    color: #333;
+  }
+  
+  .dark-theme .sidebar li {
+    color: #fff;
+  }
+  
+  .sidebar li:hover {
+    background: #ddd;
+  }
+  
+  .dark-theme .sidebar li:hover {
+    background: #444;
+  }
+  
+  /* Creazione nuova stanza */
+  .new-room {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+  
+  .new-room input {
+    flex: 1;
+    padding: 0.6rem;
+    border: 1px solid #bbb;
+    border-radius: 5px;
+    font-size: 0.9rem;
+  }
+  
+  .new-room button {
+    padding: 0.6rem 1rem;
+    border: none;
+    border-radius: 5px;
+    background: #5563DE;
+    color: #fff;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background 0.3s, transform 0.2s;
+  }
+  
+  /* Bottom della sidebar (Profilo, Logout, Settings) */
+  .sidebar-bottom {
+    margin-top: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  
+  .profile-button,
+  .logout-button,
+  .settings-button {
+    width: 100%;
+    padding: 0.7rem;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    background: #5563DE;
+    color: #fff;
+    font-size: 0.95rem;
+    text-align: center;
+    transition: background 0.3s, transform 0.2s;
+    margin-top: 0.3rem;
+  }
+  
+  .profile-button:hover,
+  .logout-button:hover,
+  .settings-button:hover {
+    background: #3e4cb8;
+    transform: scale(1.02);
+  }
+  
+  /* Chat Content */
+  .chat-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 1.25rem;
+    background: #fafafa;
+    position: relative;
+  }
+  
+  .dark-theme .chat-content {
+    background: #2c2c2c;
+    color: #f0f0f0;
+  }
+  
+  .chat-content h3 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    text-align: center;
+  }
+  
+  .dark-theme .chat-content h3 {
+    color: #fff;
+  }
+  
+  /* Lista messaggi */
+  .messages {
+    flex: 1;
+    overflow-y: auto;
+    border: 1px solid #eee;
+    border-radius: 10px;
+    padding: 1rem;
+    background: #fdfdfd;
+    margin-bottom: 1rem;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+  }
+  
+  .dark-theme .messages {
+    background: #333;
+    border: 1px solid #555;
+    color: #fff;
+  }
+  
+  .message {
+    margin-bottom: 0.8rem;
+    max-width: 70%;
+    position: relative;
+    padding: 0.8rem;
+    border-radius: 10px;
+    background: #e6e6e6;
+    color: #444;
+    word-wrap: break-word;
+  }
+  
+  .dark-theme .message {
+    background: #444;
+    color: #fff;
+  }
+  
+  .message.own {
+    margin-left: auto;
+    background: #d0ebff;
+  }
+  
+  .dark-theme .message.own {
+    background: #555e70;
+  }
+  
+  .attachment {
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+    word-break: break-all;
+  }
+  
+  /* Barra di invio messaggi centrata e curvata */
+  .new-message-bar {
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  
+  .message-input {
+    width: 40%;
+    padding: 0.6rem;
+    border: 1px solid #ccc;
+    border-radius: 999px; /* molto curvo */
+    font-size: 0.9rem;
+    outline: none;
+  }
+  
+  .dark-theme .message-input {
+    background: #444;
+    color: #fff;
+    border: 1px solid #666;
+  }
+  
+  .file-input {
+    padding: 0.6rem 0;
+    border-radius: 999px;
+  }
+  
+  .send-button {
+    background: #5563DE;
+    color: #fff;
+    border: none;
+    border-radius: 999px;
+    padding: 0.6rem 1.2rem;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background 0.3s, transform 0.2s;
+  }
+  
+  .send-button:hover {
+    background: #3e4cb8;
+    transform: scale(1.02);
+  }
+  
+  /* no-room */
+  .no-room {
+    text-align: center;
+    margin-top: 2rem;
+    color: #888;
+  }
+  
+  /* Modale inviti pendenti */
+  .invites-modal {
+    position: fixed;
+    top: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #fff;
+    border: 1px solid #ccc;
+    padding: 1.25rem;
+    border-radius: 8px;
+    z-index: 1100;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    width: 320px;
+    max-width: 80%;
+  }
+  
+  /* Context Menu */
+  .context-menu {
+    position: absolute;
+    background: #fff;
+    border: 1px solid #ccc;
+    z-index: 2000;
+    border-radius: 5px;
+    padding: 0.5rem;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.2);
+  }
+  
+  .context-menu input {
+    width: 100%;
+    margin-bottom: 0.5rem;
+    padding: 0.4rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+  }
+  
+  .context-menu button {
+    margin-right: 0.5rem;
+    padding: 0.4rem 0.8rem;
+    background: #5563DE;
+    border: none;
+    border-radius: 4px;
+    color: #fff;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.3s;
+  }
+  
+  .context-menu button:hover {
+    background: #3e4cb8;
+  }
+  
+  /* Reaction Menu (doppio click) */
+  .reaction-menu {
+    position: absolute;
+    background: #fff;
+    border: 1px solid #ccc;
+    z-index: 4000;
+    border-radius: 5px;
+    padding: 0.5rem;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.2);
+    display: flex;
+    gap: 0.5rem;
+  }
+  
+  .reaction-menu button {
+    background: transparent;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    transition: transform 0.1s;
+  }
+  
+  .reaction-menu button:hover {
+    transform: scale(1.2);
+  }
+  
+  /* Modale "Invita Utente" */
+  .invite-modal {
+    position: fixed;
+    top: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #fff;
+    width: 320px;
+    max-width: 90%;
+    padding: 1rem;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    z-index: 3000;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+  }
+  
+  .invite-modal-content {
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .invite-modal-content h3 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    text-align: center;
+  }
+  
+  .invite-modal-content input {
+    padding: 0.6rem;
+    margin-bottom: 1rem;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+  }
+  
+  /* Dettaglio canale (utenti) */
+  .channel-detail-modal {
+    position: fixed;
+    top: 15%;
+    right: 10%;
+    width: 300px;
+    max-width: 80%;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    z-index: 3000;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    padding: 1rem;
+  }
+  
+  .channel-detail-content h4 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    text-align: center;
+  }
+  
+  .channel-detail-content ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    margin-bottom: 1rem;
+  }
+  
+  .channel-detail-content li {
+    padding: 0.4rem 0;
+    border-bottom: 1px solid #eee;
+  }
+  
+  /* Schermata Settings (tema) */
+  .settings-modal {
+    position: fixed;
+    top: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #fff;
+    width: 320px;
+    max-width: 90%;
+    padding: 1rem;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    z-index: 3000;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+  }
+  
+  .settings-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+  }
+  
+  .settings-content h3 {
+    margin-top: 0;
+    margin-bottom: 0.5rem;
+    text-align: center;
+  }
+  
+  .theme-switch {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  
+  .theme-switch label {
+    font-weight: 500;
+  }
+  
+  .theme-switch input[type="checkbox"] {
+    transform: scale(1.2);
+  }
+  
