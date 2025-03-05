@@ -2,60 +2,54 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
 import './ChatRoom.css';
-import FriendsSection from './FriendsSection'; // <--- Import del componente amici
 
 function ChatRoom({ session, onShowProfile }) {
+  // ---------- 1) STATE per STANZE, MESSAGGI, FILE -----------
   const [rooms, setRooms] = useState([]);
   const [selectedRoom, setSelectedRoom] = useState(null);
-
-  // Per creare una nuova stanza
   const [newRoomName, setNewRoomName] = useState('');
 
-  // Messaggi, search e highlight
   const [messages, setMessages] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
-
-  // File allegato
   const [selectedFile, setSelectedFile] = useState(null);
 
-  // Realtime presence e typing
+  // ---------- 2) PRESENCE & TYPING -----------
   const [typingUsers, setTypingUsers] = useState([]);
   const [onlineUsers, setOnlineUsers] = useState([]);
-  const presenceChannelRef = useRef(null); // Per salvare il canale
+  const presenceChannelRef = useRef(null);
 
-  // Reazioni (doppio click)
+  // ---------- 3) REAZIONI e MENU -----------
   const [reactionMenu, setReactionMenu] = useState(null);
 
-  // Modali per invito
+  // ---------- 4) INVITO UTENTE -----------
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
-
-  // Inviti pendenti
   const [pendingInvites, setPendingInvites] = useState([]);
 
-  // Stato new message
+  // ---------- 5) INVIO MESSAGGIO -----------
   const [newMessage, setNewMessage] = useState('');
 
-  // Context menu (Dettaglio, Modifica, Elimina)
+  // ---------- 6) CONTEXT MENU STANZA -----------
   const [contextMenu, setContextMenu] = useState(null);
   const [editRoomName, setEditRoomName] = useState('');
 
-  // Stato per la modale di "Dettaglio Canale"
+  // ---------- 7) DETTAGLIO CANALE (MODALE) -----------
   const [showChannelDetail, setShowChannelDetail] = useState(false);
   const [channelMembers, setChannelMembers] = useState([]);
 
-  // Registrazione vocale
+  // ---------- 8) REGISTRAZIONE VOCALE -----------
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const [audioChunks, setAudioChunks] = useState([]);
 
-  // Settings (tema scuro/chiaro)
+  // ---------- 9) SETTINGS: MULTI-TEMA -----------
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
+  const [theme, setTheme] = useState('light'); // "light" | "dark" | "blue" | "pink" ...
 
-  // Riferimenti per chiudere menu
+  // ---------- 10) RIFERIMENTI MENU -----------
   const menuRef = useRef();
   const reactionRef = useRef();
 
+  // ---------- 11) EFFETTI INIZIALI -----------
   useEffect(() => {
     if (session) {
       fetchRooms();
@@ -68,7 +62,7 @@ function ChatRoom({ session, onShowProfile }) {
     // eslint-disable-next-line
   }, [session]);
 
-  // Chiude i menu se clicco fuori
+  // Chiusura menu cliccando fuori
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
@@ -84,9 +78,7 @@ function ChatRoom({ session, onShowProfile }) {
     };
   }, []);
 
-  // -----------
-  // 1) Rooms
-  // -----------
+  // ---------- 12) FUNZIONI: STANZE -----------
   const fetchRooms = async () => {
     const { data, error } = await supabase
       .from('room_members')
@@ -118,9 +110,7 @@ function ChatRoom({ session, onShowProfile }) {
     }
   };
 
-  // -----------
-  // 2) Inviti
-  // -----------
+  // ---------- 13) FUNZIONI: INVITI -----------
   const fetchInvitations = async () => {
     const { data, error } = await supabase
       .from('room_members')
@@ -158,9 +148,7 @@ function ChatRoom({ session, onShowProfile }) {
     }
   };
 
-  // -----------
-  // 3) Selezione stanza & Messaggi
-  // -----------
+  // ---------- 14) FUNZIONI: SELEZIONE STANZA + MESSAGGI -----------
   const handleSelectRoom = async (room) => {
     setSelectedRoom(room);
     await loadMessages(room.id);
@@ -168,12 +156,11 @@ function ChatRoom({ session, onShowProfile }) {
     // Rimuovo canali precedenti
     supabase.removeAllChannels();
 
-    // Sottoscrizione realtime
+    // Sottoscrizione realtime su messages
     const channel = supabase.channel(`room-${room.id}`, {
       config: { broadcast: { ack: true } },
     });
 
-    // Su insert di un messaggio
     channel.on('postgres_changes', {
       event: 'INSERT',
       schema: 'public',
@@ -181,10 +168,16 @@ function ChatRoom({ session, onShowProfile }) {
       filter: `room_id=eq.${room.id}`,
     }, (payload) => {
       const newMsg = payload.new;
-      setMessages((prev) => [...prev, newMsg]); // Aggiorno lo stato in tempo reale
+      setMessages((prev) => [...prev, newMsg]);
+
+      // ESEMPIO: NOTIFICA LOCALE
+      if (document.hidden) { // se la pagina non è in focus
+        new Notification('Nuovo messaggio', {
+          body: newMsg.content.slice(0, 40)
+        });
+      }
     });
 
-    // Reazioni
     channel.on('postgres_changes', {
       event: 'INSERT',
       schema: 'public',
@@ -211,28 +204,58 @@ function ChatRoom({ session, onShowProfile }) {
     }
   };
 
-  // -----------
-  // 4) Ricerca & evidenziare (live)
-  // -----------
+  // ---------- 15) RICERCA + EVIDENZIAZIONE -----------
   const highlightText = (text, term) => {
+    if (!term) term = ''; 
+    // Menzioni
+    text = text.replace(/@(\w+)/g, '<span class="mention">@$1</span>');
+
     if (!term) return text;
     const regex = new RegExp(`(${term})`, 'gi');
     return text.replace(regex, `<mark>$1</mark>`);
   };
 
-  // -----------
-  // 5) Invia messaggi / Allegati
-  // -----------
+  // ---------- 16) INVIA MESSAGGIO (con menzioni & bot) -----------
   const handleSendMessage = async () => {
-    if (!selectedRoom || (!newMessage && !selectedFile)) return;
+    if (!selectedRoom) return;
+    if (!newMessage && !selectedFile) return;
+
+    // Se /bot ...
+    if (newMessage.startsWith('/bot ')) {
+      // Esempio: Chiama un endpoint esterno e lascia che il "bot" re-inserisca il messaggio
+      const botText = newMessage.slice(5);
+      await fetch('https://mio-endpoint-bot.com/botMessage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: botText,
+          room_id: selectedRoom.id
+        })
+      });
+      setNewMessage('');
+      return; // non inserisco localmente
+    }
+
+    // Se ci sono menzioni: @pippo
+    const mentionRegex = /@(\w+)/g;
+    const matches = newMessage.match(mentionRegex);
+    if (matches) {
+      for (const m of matches) {
+        const username = m.slice(1); 
+        // Potresti cercare user in 'profiles' e inviare notifica
+        // ...
+      }
+    }
 
     let attachment_url = null;
     let file_name = null;
     let file_type = null;
 
+    // Carico file se presente
     if (selectedFile) {
       const ext = selectedFile.name.split('.').pop();
       const randomName = `${Math.random().toString(36).substring(2)}.${ext}`;
+
       let { error: uploadError } = await supabase
         .storage
         .from('attachments')
@@ -250,6 +273,7 @@ function ChatRoom({ session, onShowProfile }) {
       file_type = selectedFile.type;
     }
 
+    // Inserisco messaggio
     await supabase
       .from('messages')
       .insert([{
@@ -265,9 +289,7 @@ function ChatRoom({ session, onShowProfile }) {
     setSelectedFile(null);
   };
 
-  // -----------
-  // 6) Reazioni con doppio click
-  // -----------
+  // ---------- 17) REAZIONI (DOPPIO CLICK) -----------
   const handleMessageDoubleClick = (e, msg) => {
     setReactionMenu({
       x: e.clientX,
@@ -283,18 +305,14 @@ function ChatRoom({ session, onShowProfile }) {
     setReactionMenu(null);
   };
 
-  // -----------
-  // 7) Invito (modale)
-  // -----------
+  // ---------- 18) INVITA UTENTE -----------
   const openInviteModal = () => {
     setInviteModalOpen(true);
   };
-
   const closeInviteModal = () => {
     setInviteEmail('');
     setInviteModalOpen(false);
   };
-
   const handleSendInvite = async () => {
     if (!inviteEmail || !selectedRoom) return;
     const { data: profileData, error } = await supabase
@@ -303,7 +321,7 @@ function ChatRoom({ session, onShowProfile }) {
       .eq('email', inviteEmail)
       .maybeSingle();
     if (error || !profileData) {
-      alert('Utente non trovato in profiles.');
+      alert('Utente non trovato in profiles');
       return;
     }
     const userId = profileData.id;
@@ -317,9 +335,7 @@ function ChatRoom({ session, onShowProfile }) {
     }
   };
 
-  // -----------
-  // 8) Registrazione vocale
-  // -----------
+  // ---------- 19) REGISTRAZIONE VOCALE -----------
   const startRecording = async () => {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       alert('La registrazione audio non è supportata dal tuo browser.');
@@ -336,14 +352,12 @@ function ChatRoom({ session, onShowProfile }) {
     setMediaRecorder(recorder);
     setAudioChunks([]);
   };
-
   const stopRecording = () => {
     if (mediaRecorder) {
       mediaRecorder.stop();
       setMediaRecorder(null);
     }
   };
-
   useEffect(() => {
     if (audioChunks.length > 0 && !mediaRecorder) {
       const blob = new Blob(audioChunks, { type: 'audio/mpeg' });
@@ -353,9 +367,7 @@ function ChatRoom({ session, onShowProfile }) {
     }
   }, [audioChunks, mediaRecorder]);
 
-  // -----------
-  // 9) Presence e typing
-  // -----------
+  // ---------- 20) PRESENCE E TYPING -----------
   const joinPresenceChannel = async () => {
     const presenceChannel = supabase.channel('online-users', {
       config: {
@@ -369,7 +381,7 @@ function ChatRoom({ session, onShowProfile }) {
       setOnlineUsers(online);
     });
 
-    // Ascoltiamo broadcast eventuali (typing) -> v2 usa "on('broadcast')"
+    // ascolta broadcast event "typing"
     presenceChannel.on('broadcast', { event: 'typing' }, ({ payload }) => {
       setTypingUsers(payload.typingUsers);
     });
@@ -382,7 +394,6 @@ function ChatRoom({ session, onShowProfile }) {
 
     presenceChannelRef.current = presenceChannel;
   };
-
   const handleTyping = (isTyping) => {
     setTypingUsers((prev) => {
       const copy = new Set(prev);
@@ -405,9 +416,7 @@ function ChatRoom({ session, onShowProfile }) {
     }
   };
 
-  // -----------
-  // 10) Context menu (Dettaglio, Modifica, Elimina)
-  // -----------
+  // ---------- 21) CONTEXT MENU (DETTAGLIO, MODIFICA, ELIMINA) -----------
   const openRoomContextMenu = (room, x, y) => {
     setContextMenu({ room, x, y });
     setEditRoomName(room.name);
@@ -429,7 +438,6 @@ function ChatRoom({ session, onShowProfile }) {
       setShowChannelDetail(true);
     }
   };
-
   const handleEditRoom = async (room, newName) => {
     if (!newName) return;
     const { error } = await supabase
@@ -443,7 +451,6 @@ function ChatRoom({ session, onShowProfile }) {
       fetchRooms();
     }
   };
-
   const handleDeleteRoom = async (room) => {
     if (!window.confirm('Sei sicuro di voler eliminare questa stanza?')) return;
     await supabase
@@ -457,31 +464,41 @@ function ChatRoom({ session, onShowProfile }) {
     fetchRooms();
   };
 
-  // -----------
-  // 11) Settings (tema scuro/chiaro)
-  // -----------
-  const handleToggleTheme = () => {
-    setDarkMode(!darkMode);
+  // ---------- 22) BOZZA CHIAMATE (WEBRTC) -----------
+  const pcRef = useRef(null);
+  const [localStream, setLocalStream] = useState(null);
+  const startCall = async () => {
+    // Esempio semplificato
+    pcRef.current = new RTCPeerConnection({ 
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    });
+
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    setLocalStream(stream);
+    stream.getTracks().forEach(track => pcRef.current.addTrack(track, stream));
+
+    const offer = await pcRef.current.createOffer();
+    await pcRef.current.setLocalDescription(offer);
+
+    // Invia "offer" via presenceChannel (o un canale dedicato)
+    if (presenceChannelRef.current) {
+      presenceChannelRef.current.send({
+        type: 'broadcast',
+        event: 'webrtc-offer',
+        payload: { offer }
+      });
+    }
   };
 
-  // -----------
-  // 12) Logout
-  // -----------
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-  };
-
-  // -----------
-  // Render
-  // -----------
+  // ---------- 23) RENDER -----------
   return (
-    <div className={`chat-container ${darkMode ? 'dark-theme' : ''}`}>
-      {/* SIDEBAR */}
+    <div className={`chat-container theme-${theme}`}>
       <div className="sidebar">
         <h3>Chat Rooms</h3>
 
-        {/* SEZIONE AMICI in un componente */}
-        <FriendsSection session={session} />
+        {/* Se vuoi un link "Vai alla sezione Amici" con Router:
+           <Link to="/friends">Amici</Link>
+        */}
 
         <ul>
           {rooms.map((room) => (
@@ -512,24 +529,33 @@ function ChatRoom({ session, onShowProfile }) {
           <h4>Utenti online:</h4>
           <ul>
             {onlineUsers.map(uid => (
-              <li key={uid}>{uid === session.user.id ? 'Tu' : uid}</li>
+              <li key={uid}>
+                {uid === session.user.id ? 'Tu' : uid}
+              </li>
             ))}
           </ul>
         </div>
 
-        {/* Footer buttons: Profilo, Logout, Settings */}
+        {/* Footer: Profilo, Impostazioni, Logout */}
         <div className="sidebar-bottom">
-          <button onClick={onShowProfile} className="profile-button">Profilo</button>
-          <button onClick={() => setSettingsOpen(true)} className="settings-button">
-            &#9881; {/* icona ingranaggio base */}
+          <button onClick={onShowProfile} className="profile-button">
+            Profilo
           </button>
-          <button onClick={handleLogout} className="logout-button">Logout</button>
+          <button onClick={() => setSettingsOpen(true)} className="settings-button">
+            &#9881; {/* icona ingranaggio ingrandita da CSS */}
+          </button>
+          <button
+            onClick={async () => {
+              await supabase.auth.signOut();
+            }}
+            className="logout-button"
+          >
+            Logout
+          </button>
         </div>
       </div>
 
-      {/* CHAT */}
       <div className="chat-content">
-        {/* Inviti pendenti */}
         {pendingInvites.length > 0 && (
           <div className="invites-modal">
             <h4>Inviti pendenti</h4>
@@ -549,7 +575,11 @@ function ChatRoom({ session, onShowProfile }) {
           <>
             <h3>{selectedRoom.name}</h3>
 
-            {/* Pulsante Invita (apre modale) */}
+            {/* Avvia chiamata WEBRTC */}
+            <button onClick={startCall} style={{ marginLeft: '1rem', marginBottom: '0.5rem' }}>
+              Avvia Chiamata
+            </button>
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
               <button
                 style={{ background: '#27ae60', color: '#fff', borderRadius: '6px', padding: '0.5rem 1rem', border: 'none' }}
@@ -559,7 +589,6 @@ function ChatRoom({ session, onShowProfile }) {
               </button>
             </div>
 
-            {/* Ricerca live (niente bottone) */}
             <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'center' }}>
               <input
                 type="text"
@@ -574,7 +603,6 @@ function ChatRoom({ session, onShowProfile }) {
               {messages.map((msg) => {
                 const rawContent = msg.content || '';
                 const highlighted = highlightText(rawContent, searchTerm);
-
                 return (
                   <div
                     key={msg.id}
@@ -589,7 +617,9 @@ function ChatRoom({ session, onShowProfile }) {
                     {msg.attachment_url && (
                       <div className="attachment">
                         {msg.file_type?.startsWith('audio') ? (
-                          <audio controls src={msg.attachment_url}>Audio non supportato</audio>
+                          <audio controls src={msg.attachment_url}>
+                            Audio non supportato
+                          </audio>
                         ) : (
                           <>
                             <a
@@ -615,7 +645,7 @@ function ChatRoom({ session, onShowProfile }) {
               })}
             </div>
 
-            {/* Barra di invio messaggi, centrata e curvata */}
+            {/* Barra di invio: icona microfono, icona invio */}
             <div className="new-message-bar">
               <input
                 type="text"
@@ -629,26 +659,27 @@ function ChatRoom({ session, onShowProfile }) {
                 }}
                 onBlur={() => handleTyping(false)}
               />
+
+              {/* Icona microfono per avviare/fermare la registrazione */}
+              {mediaRecorder ? (
+                <button onClick={stopRecording} className="mic-button" title="Stop Recording">
+                  &#128264; {/* o un'icona fontawesome microfono sbarrato */}
+                </button>
+              ) : (
+                <button onClick={startRecording} className="mic-button" title="Inizia registrazione vocale">
+                  &#127908; {/* icona microfono */}
+                </button>
+              )}
+
               <input
                 type="file"
                 className="file-input"
                 onChange={(e) => setSelectedFile(e.target.files[0])}
               />
-              <button
-                className="send-button"
-                onClick={handleSendMessage}
-              >
+
+              <button className="send-button" onClick={handleSendMessage}>
                 Invia
               </button>
-            </div>
-
-            {/* Registrazione vocale */}
-            <div style={{ marginTop: '1rem', textAlign: 'center' }}>
-              {mediaRecorder ? (
-                <button onClick={stopRecording}>Stop Recording</button>
-              ) : (
-                <button onClick={startRecording}>Record Voice</button>
-              )}
             </div>
           </>
         ) : (
@@ -658,7 +689,7 @@ function ChatRoom({ session, onShowProfile }) {
         )}
       </div>
 
-      {/* Context menu (Dettaglio, Modifica, Elimina) */}
+      {/* Context Menu stanza */}
       {contextMenu && (
         <div
           ref={menuRef}
@@ -700,7 +731,7 @@ function ChatRoom({ session, onShowProfile }) {
         </div>
       )}
 
-      {/* Menu reazioni (doppio click) */}
+      {/* Reaction Menu (double-click) */}
       {reactionMenu && (
         <div
           ref={reactionRef}
@@ -729,13 +760,26 @@ function ChatRoom({ session, onShowProfile }) {
             />
             <div style={{ marginTop: '1rem' }}>
               <button
-                style={{ marginRight: '0.5rem', background: '#5563DE', color: '#fff', padding: '0.5rem 1rem', borderRadius: '6px', border: 'none' }}
+                style={{
+                  marginRight: '0.5rem',
+                  background: '#5563DE',
+                  color: '#fff',
+                  padding: '0.5rem 1rem',
+                  borderRadius: '6px',
+                  border: 'none'
+                }}
                 onClick={handleSendInvite}
               >
                 Invia Invito
               </button>
               <button
-                style={{ background: '#aaa', color: '#fff', padding: '0.5rem 1rem', borderRadius: '6px', border: 'none' }}
+                style={{
+                  background: '#aaa',
+                  color: '#fff',
+                  padding: '0.5rem 1rem',
+                  borderRadius: '6px',
+                  border: 'none'
+                }}
                 onClick={closeInviteModal}
               >
                 Annulla
@@ -762,20 +806,18 @@ function ChatRoom({ session, onShowProfile }) {
         </div>
       )}
 
-      {/* Schermata Settings */}
+      {/* Modale Settings: multi-tema */}
       {settingsOpen && (
         <div className="settings-modal">
           <div className="settings-content">
             <h3>Impostazioni</h3>
-            <div className="theme-switch">
-              <label htmlFor="themeToggle">Tema scuro</label>
-              <input
-                id="themeToggle"
-                type="checkbox"
-                checked={darkMode}
-                onChange={handleToggleTheme}
-              />
-            </div>
+            <label>Seleziona tema:</label>
+            <select value={theme} onChange={(e) => setTheme(e.target.value)}>
+              <option value="light">Chiaro</option>
+              <option value="dark">Scuro</option>
+              <option value="blue">Blu</option>
+              <option value="pink">Rosa</option>
+            </select>
             <button onClick={() => setSettingsOpen(false)}>Chiudi</button>
           </div>
         </div>

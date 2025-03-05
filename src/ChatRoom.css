@@ -126,7 +126,7 @@
     cursor: pointer;
     background: #5563DE;
     color: #fff;
-    font-size: 0.95rem;
+    font-size: 1.4rem;
     text-align: center;
     transition: background 0.3s, transform 0.2s;
     margin-top: 0.3rem;
@@ -449,4 +449,25 @@
   .theme-switch input[type="checkbox"] {
     transform: scale(1.2);
   }
+
+  @media (max-width: 768px) {
+    .new-message-bar {
+      flex-direction: column; /* i campi vanno in colonna */
+      align-items: stretch;
+    }
+  
+    .message-input {
+      width: 100% !important; 
+      margin-bottom: 0.5rem;
+    }
+  
+    .file-input {
+      margin-bottom: 0.5rem;
+    }
+  
+    .send-button {
+      width: 100%;
+    }
+  }
+  
   

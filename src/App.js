@@ -1,53 +1,60 @@
 // src/App.js
 import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { supabase } from './supabaseClient';
-import Login from './Login';
 import ChatRoom from './ChatRoom';
-import Profile from './Profile';
-import './App.css';
+import FriendsPage from './FriendsPage';
+import Login from './Login';
 
 function App() {
   const [session, setSession] = useState(null);
-  const [showProfile, setShowProfile] = useState(false);
 
   useEffect(() => {
-    async function loadSession() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      setSession(session);
-    }
-    loadSession();
-
+    // Carico la session da Supabase
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+    });
+    // Ascolta i cambiamenti di auth
     const { data: authListener } = supabase.auth.onAuthStateChange(
       (event, session) => {
         setSession(session);
       }
     );
-
+    // Ritorno cleanup
     return () => {
       authListener.subscription.unsubscribe();
     };
   }, []);
 
-  const handleShowProfile = () => {
-    setShowProfile(true);
-  };
-
-  const handleCloseProfile = () => {
-    setShowProfile(false);
-  };
+  // Richiesta permesso Notifiche + registra service worker
+  useEffect(() => {
+    if ('Notification' in window) {
+      Notification.requestPermission().then((permission) => {
+        if (permission === 'granted') {
+          console.log('Notifiche consentite dal browser.');
+        } else {
+          console.log('Notifiche negate/ignorate.');
+        }
+      });
+    }
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw-push.js')
+        .then(reg => console.log('SW registrato con successo:', reg))
+        .catch(err => console.error('SW registration error:', err));
+    }
+  }, []);
 
   if (!session) {
     return <Login />;
   }
 
-  if (showProfile) {
-    return <Profile session={session} onClose={handleCloseProfile} />;
-  }
-
   return (
-    <ChatRoom session={session} onShowProfile={handleShowProfile} />
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<ChatRoom session={session} />} />
+        <Route path="/friends" element={<FriendsPage session={session} />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 
